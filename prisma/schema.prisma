@@ -35,6 +35,7 @@ model User {
   reviews       Review[]
   wishlistItems WishlistItem[]
   customOrders  CustomOrder[]
+  measurements  Measurement[]
   
   @@map("users")
 }
@@ -182,17 +183,48 @@ model CustomOrder {
   fabricColor   String
   frontDesign   String
   backDesign    String
-  measurements  String
+  oldMeasurements  String
   price         Float
   notes         String?
   appointmentDate DateTime?
+  appointmentType String? // 'VIRTUAL' or 'IN_PERSON'
+  measurementDetails String? // JSON string for detailed measurements
   createdAt     DateTime         @default(now())
   updatedAt     DateTime         @updatedAt
   
   // Relations
   user User @relation(fields: [userId], references: [id])
+  detailedMeasurements Measurement[]
   
   @@map("custom_orders")
+}
+
+model Measurement {
+  id                 String   @id @default(cuid())
+  customOrderId      String?
+  userId             String?
+  blouseBackLength   Float?
+  fullShoulder       Float?
+  shoulderStrap      Float?
+  backNeckDepth      Float?
+  frontNeckDepth     Float?
+  shoulderToApex     Float?
+  frontLength        Float?
+  chest              Float?
+  waist              Float?
+  sleeveLength       Float?
+  armRound           Float?
+  sleeveRound        Float?
+  armHole            Float?
+  notes              String?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  
+  // Relations
+  customOrder CustomOrder? @relation(fields: [customOrderId], references: [id], onDelete: Cascade)
+  user        User?        @relation(fields: [userId], references: [id])
+  
+  @@map("measurements")
 }
 
 model Fabric {
@@ -215,6 +247,7 @@ model BlouseDesign {
   type        DesignType
   image       String?
   description String?
+  stitchCost  Float          @default(0)
   isActive    Boolean        @default(true)
   createdAt   DateTime       @default(now())
   updatedAt   DateTime       @updatedAt

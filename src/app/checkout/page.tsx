@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useCart } from "@/contexts/CartContext"
+import { useAuth } from "@/contexts/AuthContext"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -23,6 +24,7 @@ import {
   ShoppingCart
 } from "lucide-react"
 import Link from "next/link"
+import { useSearchParams } from "next/navigation"
 
 type CheckoutStep = "shipping" | "payment" | "confirmation"
 
@@ -48,6 +50,14 @@ interface PaymentInfo {
 
 export default function CheckoutPage() {
   const { state, clearCart } = useCart()
+  const { state: authState } = useAuth()
+  const searchParams = useSearchParams()
+  const itemId = searchParams.get('itemId')
+  
+  // Filter items for single item checkout
+  const checkoutItems = itemId ? state.items.filter(item => item.id === itemId) : state.items
+  const isSingleItemCheckout = !!itemId
+  
   const [currentStep, setCurrentStep] = useState<CheckoutStep>("shipping")
   const [shippingInfo, setShippingInfo] = useState<ShippingInfo>({
     firstName: "",
@@ -78,7 +88,9 @@ export default function CheckoutPage() {
     return `₹${price.toLocaleString()}`
   }
 
-  const subtotal = state.total
+  // Calculate totals based on checkout items
+  const checkoutItemCount = checkoutItems.reduce((sum, item) => sum + item.quantity, 0)
+  const subtotal = checkoutItems.reduce((sum, item) => sum + (item.finalPrice * item.quantity), 0)
   const shipping = subtotal > 999 ? 0 : 99
   const tax = subtotal * 0.18
   const total = subtotal + shipping + tax
@@ -99,20 +111,107 @@ export default function CheckoutPage() {
     }, 2000)
   }
 
-  const handlePlaceOrder = () => {
-    // Here you would integrate with your order creation API
-    clearCart()
-    // Redirect to order confirmation page
+  const handlePlaceOrder = async () => {
+    setIsProcessing(true)
+    
+    try {
+      // Use AuthContext for user authentication
+      if (!authState.user) {
+        throw new Error('User not authenticated. Please log in to place an order.')
+      }
+
+      // Prepare order data
+      const orderData = {
+        userId: authState.user.id,
+        items: checkoutItems.map(item => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          finalPrice: item.finalPrice,
+          name: item.name,
+          customDesign: item.customDesign
+        })),
+        shippingInfo: {
+          firstName: shippingInfo.firstName,
+          lastName: shippingInfo.lastName,
+          email: shippingInfo.email,
+          phone: shippingInfo.phone,
+          address: shippingInfo.address,
+          city: shippingInfo.city,
+          state: shippingInfo.state,
+          zipCode: shippingInfo.zipCode,
+          country: shippingInfo.country
+        },
+        paymentInfo: {
+          method: paymentInfo.method,
+          notes: ""
+        },
+        subtotal,
+        tax,
+        shipping,
+        total
+      }
+
+      console.log("🛒 Creating order with data:", {
+        userId: orderData.userId,
+        itemCount: orderData.items.length,
+        total: orderData.total
+      })
+
+      // Create order via API
+      const response = await fetch('/api/orders', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify(orderData)
+      })
+
+      console.log("📡 Order API response status:", response.status)
+
+      if (response.ok) {
+        const { order } = await response.json()
+        console.log("✅ Order created successfully:", order)
+        
+        // Clear cart (either specific item or entire cart)
+        if (isSingleItemCheckout && itemId) {
+          // Remove only the specific item - this would need to be implemented in cart context
+          // For now, we'll clear the entire cart
+          clearCart()
+        } else {
+          clearCart()
+        }
+        
+        // Redirect to order confirmation page with order ID
+        window.location.href = `/order-confirmation?orderId=${order.id}&orderNumber=${order.orderNumber}`
+      } else {
+        const errorData = await response.json()
+        console.error("❌ Order creation failed:", errorData)
+        throw new Error(errorData.error || 'Failed to create order')
+      }
+    } catch (error) {
+      console.error('Error placing order:', error)
+      alert('Failed to place order. Please try again.')
+    } finally {
+      setIsProcessing(false)
+    }
   }
 
-  if (state.items.length === 0) {
+  if (checkoutItems.length === 0) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <Card className="w-full max-w-md">
           <CardContent className="p-8 text-center">
             <ShoppingCart className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-            <h2 className="text-2xl font-bold mb-2">Your cart is empty</h2>
-            <p className="text-gray-600 mb-6">Add some items to your cart to continue</p>
+            <h2 className="text-2xl font-bold mb-2">
+              {isSingleItemCheckout ? "Item not found" : "Your cart is empty"}
+            </h2>
+            <p className="text-gray-600 mb-6">
+              {isSingleItemCheckout 
+                ? "The requested item could not be found in your cart." 
+                : "Add some items to your cart to continue"
+              }
+            </p>
             <Button asChild>
               <Link href="/shop">Continue Shopping</Link>
             </Button>
@@ -132,7 +231,7 @@ export default function CheckoutPage() {
               <h1 className="text-2xl font-bold">Checkout</h1>
               <p className="text-gray-600">Complete your order in just a few steps</p>
             </div>
-            <Badge variant="secondary">{state.itemCount} items</Badge>
+            <Badge variant="secondary">{checkoutItemCount} items</Badge>
           </div>
         </div>
       </div>
@@ -451,11 +550,14 @@ export default function CheckoutPage() {
               <CardContent className="space-y-4">
                 {/* Items */}
                 <div className="space-y-3">
-                  {state.items.map((item) => (
+                  {checkoutItems.map((item) => (
                     <div key={item.id} className="flex justify-between items-start">
                       <div className="flex-1">
                         <p className="font-medium text-sm">{item.name}</p>
                         <p className="text-xs text-gray-500">Qty: {item.quantity}</p>
+                        {isSingleItemCheckout && item.customDesign && (
+                          <p className="text-xs text-blue-600">Single Item Checkout</p>
+                        )}
                       </div>
                       <span className="font-medium text-sm">
                         {formatPrice(item.finalPrice * item.quantity)}

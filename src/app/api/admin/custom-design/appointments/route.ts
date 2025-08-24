@@ -82,7 +82,7 @@ export async function POST(request: NextRequest) {
         fabricColor: '',
         frontDesign: '',
         backDesign: '',
-        measurements: '',
+        oldMeasurements: '',
         price: 0,
       },
       include: {

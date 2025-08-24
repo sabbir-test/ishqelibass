@@ -46,15 +46,19 @@ export async function POST(request: NextRequest) {
           orderId: order.id,
           productId: item.productId,
           quantity: item.quantity,
-          price: item.finalPrice
+          price: item.finalPrice,
+          size: item.size,
+          color: item.color
         }
       })
 
-      // Update product stock
-      await db.product.update({
-        where: { id: item.productId },
-        data: { stock: { decrement: item.quantity } }
-      })
+      // Update product stock only for regular products (not custom designs)
+      if (item.productId !== "custom-blouse") {
+        await db.product.update({
+          where: { id: item.productId },
+          data: { stock: { decrement: item.quantity } }
+        })
+      }
     }
 
     // Clear user's cart

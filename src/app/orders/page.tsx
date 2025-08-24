@@ -13,6 +13,17 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { 
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
+import { 
   ShoppingBag,
   Search,
   Filter,
@@ -24,7 +35,8 @@ import {
   XCircle,
   Clock,
   Eye,
-  Download
+  Download,
+  Ban
 } from "lucide-react"
 import { useAuth } from "@/contexts/AuthContext"
 import Link from "next/link"
@@ -35,6 +47,8 @@ interface OrderItem {
   price: number
   quantity: number
   image: string
+  size?: string
+  color?: string
 }
 
 interface Order {
@@ -68,6 +82,9 @@ export default function OrdersPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState("all")
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null)
+  const [cancelOrder, setCancelOrder] = useState<Order | null>(null)
+  const [cancellationReason, setCancellationReason] = useState("")
+  const [isCancelling, setIsCancelling] = useState(false)
 
   useEffect(() => {
     if (authState.user) {
@@ -82,7 +99,11 @@ export default function OrdersPage() {
   const loadOrders = async () => {
     setIsLoading(true)
     try {
-      const response = await fetch('/api/orders', {
+      if (!authState.user) {
+        throw new Error('User not authenticated')
+      }
+
+      const response = await fetch(`/api/orders?userId=${authState.user.id}`, {
         headers: {
           'Authorization': `Bearer ${localStorage.getItem('token')}`
         }
@@ -90,109 +111,40 @@ export default function OrdersPage() {
       
       if (response.ok) {
         const data = await response.json()
-        // Transform mock data to match our interface
-        const mockOrders: Order[] = [
-          {
-            id: "1",
-            orderNumber: "ISHQ-2024-001",
-            status: "delivered",
-            total: 2999,
-            subtotal: 2999,
-            shipping: 0,
-            discount: 0,
-            createdAt: "2024-01-15T10:30:00Z",
-            updatedAt: "2024-01-20T15:45:00Z",
-            items: [
-              {
-                id: "1",
-                name: "Elegant Silk Saree",
-                price: 2999,
-                quantity: 1,
-                image: "/api/placeholder/300/400"
-              }
-            ],
-            shippingAddress: {
-              name: authState.user?.name || "User",
-              phone: "+91 98765 43210",
-              address: "123 Fashion Street",
-              city: "Mumbai",
-              state: "Maharashtra",
-              pincode: "400001"
-            },
-            paymentMethod: "COD",
-            estimatedDelivery: "2024-01-20"
-          },
-          {
-            id: "2",
-            orderNumber: "ISHQ-2024-002",
-            status: "shipped",
-            total: 4599,
-            subtotal: 4599,
-            shipping: 0,
-            discount: 0,
-            createdAt: "2024-01-18T14:20:00Z",
-            updatedAt: "2024-01-19T11:30:00Z",
-            items: [
-              {
-                id: "2",
-                name: "Designer Kurti",
-                price: 1599,
-                quantity: 1,
-                image: "/api/placeholder/300/400"
-              },
-              {
-                id: "3",
-                name: "Embroidered Dupatta",
-                price: 3000,
-                quantity: 1,
-                image: "/api/placeholder/300/400"
-              }
-            ],
-            shippingAddress: {
-              name: authState.user?.name || "User",
-              phone: "+91 98765 43210",
-              address: "123 Fashion Street",
-              city: "Mumbai",
-              state: "Maharashtra",
-              pincode: "400001"
-            },
-            paymentMethod: "Online",
-            estimatedDelivery: "2024-01-25"
-          },
-          {
-            id: "3",
-            orderNumber: "ISHQ-2024-003",
-            status: "processing",
-            total: 5999,
-            subtotal: 5999,
-            shipping: 0,
-            discount: 0,
-            createdAt: "2024-01-20T09:15:00Z",
-            updatedAt: "2024-01-20T09:15:00Z",
-            items: [
-              {
-                id: "4",
-                name: "Bridal Lehenga",
-                price: 5999,
-                quantity: 1,
-                image: "/api/placeholder/300/400"
-              }
-            ],
-            shippingAddress: {
-              name: authState.user?.name || "User",
-              phone: "+91 98765 43210",
-              address: "123 Fashion Street",
-              city: "Mumbai",
-              state: "Maharashtra",
-              pincode: "400001"
-            },
-            paymentMethod: "Online"
-          }
-        ]
-        setOrders(mockOrders)
+        
+        // Transform database orders to match our interface
+        const transformedOrders: Order[] = data.orders.map((order: any) => ({
+          id: order.id,
+          orderNumber: order.orderNumber,
+          status: order.status.toLowerCase(),
+          total: order.total,
+          subtotal: order.subtotal,
+          shipping: order.shipping,
+          discount: order.discount,
+          createdAt: order.createdAt,
+          updatedAt: order.updatedAt,
+          items: order.orderItems.map((item: any) => ({
+            id: item.id,
+            name: item.product?.name || 'Custom Product',
+            price: item.price,
+            quantity: item.quantity,
+            image: item.product?.images?.split(',')[0] || '/api/placeholder/300/400',
+            size: item.size,
+            color: item.color
+          })),
+          shippingAddress: JSON.parse(order.shippingAddress || '{}'),
+          paymentMethod: order.paymentMethod,
+          estimatedDelivery: order.estimatedDelivery
+        }))
+        
+        setOrders(transformedOrders)
+      } else {
+        console.error('Failed to load orders:', response.status)
+        setOrders([])
       }
     } catch (error) {
       console.error('Error loading orders:', error)
+      setOrders([])
     } finally {
       setIsLoading(false)
     }
@@ -216,6 +168,8 @@ export default function OrdersPage() {
 
     setFilteredOrders(filtered)
   }
+
+  
 
   const getStatusIcon = (status: string) => {
     switch (status.toLowerCase()) {
@@ -253,6 +207,46 @@ export default function OrdersPage() {
       month: 'long',
       day: 'numeric'
     })
+  }
+
+  
+
+  const confirmCancelOrder = async () => {
+    if (!cancelOrder || !cancellationReason.trim()) {
+      alert("Please provide a reason for cancellation")
+      return
+    }
+
+    setIsCancelling(true)
+    try {
+      const response = await fetch(`/api/orders/${cancelOrder.id}/cancel`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${localStorage.getItem('token')}`
+        },
+        body: JSON.stringify({ reason: cancellationReason })
+      })
+
+      if (response.ok) {
+        // Update order status locally
+        setOrders(prev => prev.map(order => 
+          order.id === cancelOrder.id 
+            ? { ...order, status: 'cancelled' }
+            : order
+        ))
+        setCancelOrder(null)
+        setCancellationReason("")
+        alert("Order cancelled successfully")
+      } else {
+        throw new Error("Failed to cancel order")
+      }
+    } catch (error) {
+      console.error("Error cancelling order:", error)
+      alert("Failed to cancel order. Please try again.")
+    } finally {
+      setIsCancelling(false)
+    }
   }
 
   if (!authState.user) {
@@ -390,7 +384,11 @@ export default function OrdersPage() {
                             </div>
                             <div className="flex-1">
                               <h4 className="font-medium text-gray-900">{item.name}</h4>
-                              <p className="text-sm text-gray-500">Qty: {item.quantity}</p>
+                              <div className="flex gap-2 text-sm text-gray-500">
+                                <span>Qty: {item.quantity}</span>
+                                {item.size && <span>Size: {item.size}</span>}
+                                {item.color && <span>Color: {item.color}</span>}
+                              </div>
                             </div>
                             <div className="text-right">
                               <p className="font-medium text-gray-900">
@@ -427,7 +425,7 @@ export default function OrdersPage() {
                       <Button 
                         variant="outline" 
                         className="w-full"
-                        onClick={() => setSelectedOrder(order)}
+                        onClick={() => window.location.href = `/orders/${order.id}`}
                       >
                         <Eye className="h-4 w-4 mr-2" />
                         View Details
@@ -439,9 +437,64 @@ export default function OrdersPage() {
                         </Button>
                       )}
                       {['processing', 'shipped'].includes(order.status) && (
-                        <Button variant="outline" className="w-full">
-                          Track Order
-                        </Button>
+                        <>
+                          <Button variant="outline" className="w-full">
+                            Track Order
+                          </Button>
+                          <Dialog>
+                            <DialogTrigger asChild>
+                              <Button 
+                                variant="outline" 
+                                className="w-full text-red-600 hover:text-red-700 border-red-300 hover:border-red-400"
+                                onClick={() => setCancelOrder(order)}
+                              >
+                                <Ban className="h-4 w-4 mr-2" />
+                                Cancel Order
+                              </Button>
+                            </DialogTrigger>
+                            <DialogContent>
+                              <DialogHeader>
+                                <DialogTitle className="flex items-center gap-2">
+                                  <Clock className="h-5 w-5 text-yellow-600" />
+                                  Cancel Order
+                                </DialogTitle>
+                                <DialogDescription>
+                                  Are you sure you want to cancel order #{order.orderNumber}? This action cannot be undone.
+                                </DialogDescription>
+                              </DialogHeader>
+                              <div className="space-y-4">
+                                <div>
+                                  <Label htmlFor="reason">Reason for Cancellation</Label>
+                                  <Textarea
+                                    id="reason"
+                                    placeholder="Please provide a reason for cancelling this order..."
+                                    value={cancellationReason}
+                                    onChange={(e) => setCancellationReason(e.target.value)}
+                                    className="mt-2"
+                                  />
+                                </div>
+                                <DialogFooter>
+                                  <Button 
+                                    variant="outline" 
+                                    onClick={() => {
+                                      setCancelOrder(null)
+                                      setCancellationReason("")
+                                    }}
+                                  >
+                                    Keep Order
+                                  </Button>
+                                  <Button 
+                                    variant="destructive" 
+                                    onClick={confirmCancelOrder}
+                                    disabled={!cancellationReason.trim() || isCancelling}
+                                  >
+                                    {isCancelling ? 'Cancelling...' : 'Cancel Order'}
+                                  </Button>
+                                </DialogFooter>
+                              </div>
+                            </DialogContent>
+                          </Dialog>
+                        </>
                       )}
                     </div>
                   </div>
@@ -464,19 +517,31 @@ export default function OrdersPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-6">
-                {/* Status Timeline */}
+                {/* Order Status */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-gray-500">Order Status</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      {getStatusIcon(selectedOrder.status)}
+                      <Badge className={getStatusColor(selectedOrder.status)}>
+                        {selectedOrder.status.charAt(0).toUpperCase() + selectedOrder.status.slice(1)}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-sm text-gray-500">Order Date</p>
+                    <p className="font-medium">{formatDate(selectedOrder.createdAt)}</p>
+                  </div>
+                </div>
+
+                {/* Shipping Address */}
                 <div>
-                  <h4 className="font-medium text-gray-900 mb-3">Order Status</h4>
-                  <div className="flex items-center gap-2">
-                    {getStatusIcon(selectedOrder.status)}
-                    <Badge className={getStatusColor(selectedOrder.status)}>
-                      {selectedOrder.status.charAt(0).toUpperCase() + selectedOrder.status.slice(1)}
-                    </Badge>
-                    {selectedOrder.estimatedDelivery && (
-                      <span className="text-sm text-gray-500">
-                        Estimated delivery: {formatDate(selectedOrder.estimatedDelivery)}
-                      </span>
-                    )}
+                  <h4 className="font-medium text-gray-900 mb-3">Shipping Address</h4>
+                  <div className="bg-gray-50 p-4 rounded-lg">
+                    <p className="font-medium">{selectedOrder.shippingAddress.firstName} {selectedOrder.shippingAddress.lastName}</p>
+                    <p className="text-sm text-gray-600">{selectedOrder.shippingAddress.address}</p>
+                    <p className="text-sm text-gray-600">{selectedOrder.shippingAddress.city}, {selectedOrder.shippingAddress.state} {selectedOrder.shippingAddress.pincode}</p>
+                    <p className="text-sm text-gray-600">Phone: {selectedOrder.shippingAddress.phone}</p>
                   </div>
                 </div>
 
@@ -491,7 +556,11 @@ export default function OrdersPage() {
                         </div>
                         <div className="flex-1">
                           <h5 className="font-medium text-gray-900">{item.name}</h5>
-                          <p className="text-sm text-gray-500">Quantity: {item.quantity}</p>
+                          <div className="flex gap-2 text-sm text-gray-500">
+                            <span>Qty: {item.quantity}</span>
+                            {item.size && <span>Size: {item.size}</span>}
+                            {item.color && <span>Color: {item.color}</span>}
+                          </div>
                         </div>
                         <div className="text-right">
                           <p className="font-medium text-gray-900">
@@ -503,66 +572,83 @@ export default function OrdersPage() {
                   </div>
                 </div>
 
-                {/* Price Breakdown */}
+                {/* Order Summary */}
                 <div>
-                  <h4 className="font-medium text-gray-900 mb-3">Price Details</h4>
+                  <h4 className="font-medium text-gray-900 mb-3">Order Summary</h4>
                   <div className="space-y-2">
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Subtotal</span>
-                      <span className="font-medium">
-                        <IndianRupee className="inline h-3 w-3" />{selectedOrder.subtotal}
-                      </span>
+                    <div className="flex justify-between text-sm">
+                      <span>Subtotal</span>
+                      <span><IndianRupee className="inline h-3 w-3" />{selectedOrder.subtotal}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Shipping</span>
-                      <span className="font-medium">
-                        <IndianRupee className="inline h-3 w-3" />{selectedOrder.shipping}
-                      </span>
+                    <div className="flex justify-between text-sm">
+                      <span>Shipping</span>
+                      <span><IndianRupee className="inline h-3 w-3" />{selectedOrder.shipping}</span>
                     </div>
-                    <div className="flex justify-between">
-                      <span className="text-gray-600">Discount</span>
-                      <span className="font-medium text-green-600">
-                        -<IndianRupee className="inline h-3 w-3" />{selectedOrder.discount}
-                      </span>
+                    <div className="flex justify-between text-sm">
+                      <span>Tax</span>
+                      <span><IndianRupee className="inline h-3 w-3" />{selectedOrder.tax || 0}</span>
+                    </div>
+                    <div className="flex justify-between text-sm">
+                      <span>Discount</span>
+                      <span className="text-green-600">-<IndianRupee className="inline h-3 w-3" />{selectedOrder.discount}</span>
                     </div>
                     <div className="border-t pt-2">
-                      <div className="flex justify-between">
-                        <span className="font-semibold text-gray-900">Total</span>
-                        <span className="font-bold text-lg text-gray-900">
-                          <IndianRupee className="inline h-4 w-4" />{selectedOrder.total}
-                        </span>
+                      <div className="flex justify-between font-medium">
+                        <span>Total</span>
+                        <span><IndianRupee className="inline h-3 w-3" />{selectedOrder.total}</span>
                       </div>
                     </div>
                   </div>
                 </div>
 
-                {/* Shipping Address */}
+                {/* Payment Information */}
                 <div>
-                  <h4 className="font-medium text-gray-900 mb-3">Shipping Address</h4>
+                  <h4 className="font-medium text-gray-900 mb-3">Payment Information</h4>
                   <div className="bg-gray-50 p-4 rounded-lg">
-                    <p className="font-medium text-gray-900">{selectedOrder.shippingAddress.name}</p>
-                    <p className="text-gray-600">{selectedOrder.shippingAddress.phone}</p>
-                    <p className="text-gray-600">{selectedOrder.shippingAddress.address}</p>
-                    <p className="text-gray-600">
-                      {selectedOrder.shippingAddress.city}, {selectedOrder.shippingAddress.state} - {selectedOrder.shippingAddress.pincode}
-                    </p>
+                    <p className="text-sm"><span className="font-medium">Method:</span> {selectedOrder.paymentMethod}</p>
+                    <p className="text-sm"><span className="font-medium">Status:</span> {selectedOrder.paymentStatus || 'Pending'}</p>
                   </div>
-                </div>
-
-                {/* Action Buttons */}
-                <div className="flex gap-3 pt-4 border-t">
-                  <Button variant="outline" className="flex-1">
-                    <Download className="h-4 w-4 mr-2" />
-                    Download Invoice
-                  </Button>
-                  <Button variant="outline" className="flex-1">
-                    Contact Support
-                  </Button>
                 </div>
               </CardContent>
             </Card>
           </div>
         )}
+
+        {/* Cancellation Confirmation Dialog */}
+        <Dialog open={!!cancelOrder} onOpenChange={() => setCancelOrder(null)}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Cancel Order</DialogTitle>
+              <DialogDescription>
+                Are you sure you want to cancel order #{cancelOrder?.orderNumber}? This action cannot be undone.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <Label htmlFor="reason">Reason for Cancellation</Label>
+                <Textarea
+                  id="reason"
+                  placeholder="Please tell us why you want to cancel this order..."
+                  value={cancellationReason}
+                  onChange={(e) => setCancellationReason(e.target.value)}
+                  className="mt-2"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setCancelOrder(null)}>
+                Keep Order
+              </Button>
+              <Button 
+                variant="destructive" 
+                onClick={confirmCancelOrder}
+                disabled={isCancelling || !cancellationReason.trim()}
+              >
+                {isCancelling ? "Cancelling..." : "Cancel Order"}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   )

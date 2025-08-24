@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
         fabricColor,
         frontDesign,
         backDesign,
-        measurements: JSON.stringify(measurements),
+        oldMeasurements: JSON.stringify(measurements),
         price,
         notes,
         appointmentDate: appointmentDate ? new Date(appointmentDate) : null

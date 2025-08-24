@@ -103,7 +103,7 @@ export default function FeaturedProducts() {
   ]
 
   const renderStars = (rating: number) => {
-    const stars = []
+    const stars: React.JSX.Element[] = []
     const fullStars = Math.floor(rating)
     const hasHalfStar = rating % 1 !== 0
 

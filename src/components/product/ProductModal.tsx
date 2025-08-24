@@ -22,8 +22,8 @@ interface Product {
   rating: number
   reviewCount: number
   inStock: boolean
-  sizes?: string[]
-  colors?: string[]
+  sizes?: string
+  colors?: string
 }
 
 interface ProductModalProps {

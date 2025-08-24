@@ -79,6 +79,7 @@ interface BlouseDesign {
   type: "FRONT" | "BACK"
   image?: string
   description?: string
+  stitchCost: number
   isActive: boolean
   createdAt: string
   updatedAt: string

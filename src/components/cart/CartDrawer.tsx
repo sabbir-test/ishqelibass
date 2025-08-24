@@ -107,6 +107,43 @@ export default function CartDrawer() {
                             </div>
                           )}
                           
+                          {/* Custom Design Details */}
+                          {item.productId === "custom-blouse" && item.customDesign && (
+                            <div className="mb-2 p-2 bg-gray-50 rounded-md">
+                              <div className="text-xs font-medium text-gray-700 mb-1">Custom Design Details:</div>
+                              {item.customDesign.fabric && (
+                                <div className="text-xs text-gray-600 mb-1">
+                                  Fabric: <span className="font-medium">{item.customDesign.fabric.name}</span>
+                                </div>
+                              )}
+                              {item.customDesign.frontDesign && (
+                                <div className="text-xs text-gray-600 mb-1">
+                                  Front Design: <span className="font-medium">{item.customDesign.frontDesign.name}</span>
+                                </div>
+                              )}
+                              {item.customDesign.backDesign && (
+                                <div className="text-xs text-gray-600 mb-1">
+                                  Back Design: <span className="font-medium">{item.customDesign.backDesign.name}</span>
+                                </div>
+                              )}
+                              {item.customDesign.selectedModels?.frontModel && (
+                                <div className="text-xs text-gray-600 mb-1">
+                                  Front Model: <span className="font-medium">{item.customDesign.selectedModels.frontModel.name}</span>
+                                </div>
+                              )}
+                              {item.customDesign.selectedModels?.backModel && (
+                                <div className="text-xs text-gray-600 mb-1">
+                                  Back Model: <span className="font-medium">{item.customDesign.selectedModels.backModel.name}</span>
+                                </div>
+                              )}
+                              {item.customDesign.ownFabricDetails && item.customDesign.ownFabricDetails.name && (
+                                <div className="text-xs text-gray-600 mb-1">
+                                  Customer's Fabric: <span className="font-medium">{item.customDesign.ownFabricDetails.name}</span>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                          
                           {/* Price */}
                           <div className="flex items-center gap-2 mb-3">
                             <span className="font-semibold text-sm">
@@ -158,6 +195,17 @@ export default function CartDrawer() {
                                 className="h-8 w-8 text-pink-500 hover:text-pink-700"
                               >
                                 <Heart className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 px-3 text-xs bg-green-600 hover:bg-green-700 text-white"
+                                onClick={toggleCart}
+                                asChild
+                              >
+                                <Link href={`/checkout?itemId=${item.id}`}>
+                                  Buy Now
+                                </Link>
                               </Button>
                             </div>
                           </div>

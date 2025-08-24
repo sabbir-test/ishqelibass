@@ -1355,6 +1355,7 @@ export default function AdminAppointmentsPage() {
                     />
                     <Button
                       onClick={() => updateAppointmentStatus(
+                        selectedAppointment.id,
                         selectedAppointment.status,
                         selectedAppointment.notes
                       )}

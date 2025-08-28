@@ -9,7 +9,6 @@ import { Label } from "@/components/ui/label"
 import { Textarea } from "@/components/ui/textarea"
 import { Progress } from "@/components/ui/progress"
 import { Separator } from "@/components/ui/separator"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { 
   ArrowLeft, 
   ArrowRight, 
@@ -20,7 +19,6 @@ import {
   CheckCircle,
   AlertCircle,
   Upload,
-  Eye,
   ShoppingCart,
   Loader2,
   X,
@@ -29,7 +27,6 @@ import {
 } from "lucide-react"
 import { useCart } from "@/contexts/CartContext"
 import { useToast } from "@/hooks/use-toast"
-import DesignVariantsModal from "@/components/custom-design/DesignVariantsModal"
 
 type DesignStep = "fabric" | "design" | "measurements" | "review"
 
@@ -126,54 +123,7 @@ interface CustomDesign {
   ownFabricDetails?: OwnFabricDetails | null
 }
 
-// Simple cache implementation
-const useDataCache = () => {
-  const [cache, setCache] = useState<Record<string, { data: any; timestamp: number }>>({})
-  
-  const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
-  
-  const get = (key: string) => {
-    const cached = cache[key]
-    if (!cached) return null
-    
-    const isExpired = Date.now() - cached.timestamp > CACHE_DURATION
-    if (isExpired) {
-      // Remove expired cache
-      setCache(prev => {
-        const newCache = { ...prev }
-        delete newCache[key]
-        return newCache
-      })
-      return null
-    }
-    
-    return cached.data
-  }
-  
-  const set = (key: string, data: any) => {
-    setCache(prev => ({
-      ...prev,
-      [key]: { data, timestamp: Date.now() }
-    }))
-  }
-  
-  const clear = (key?: string) => {
-    if (key) {
-      setCache(prev => {
-        const newCache = { ...prev }
-        delete newCache[key]
-        return newCache
-      })
-    } else {
-      setCache({})
-    }
-  }
-  
-  return { get, set, clear }
-}
-
 export default function CustomDesignPage() {
-  const { get: getCache, set: setCache, clear: clearCache } = useDataCache()
   const [currentStep, setCurrentStep] = useState<DesignStep>("fabric")
   const [design, setDesign] = useState<CustomDesign>({
     fabric: null,
@@ -205,17 +155,12 @@ export default function CustomDesignPage() {
   })
   const [isProcessing, setIsProcessing] = useState(false)
   const [fabrics, setFabrics] = useState<Fabric[]>([])
-  const [frontDesigns, setFrontDesigns] = useState<BlouseDesign[]>([])
-  const [backDesigns, setBackDesigns] = useState<BlouseDesign[]>([])
   const [models, setModels] = useState<BlouseModel[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [modelsPage, setModelsPage] = useState(1)
-  const [hasMoreModels, setHasMoreModels] = useState(true)
-  const MODES_PER_PAGE = 12
-  const [showVariantsModal, setShowVariantsModal] = useState(false)
-  const [selectedDesignForVariants, setSelectedDesignForVariants] = useState<BlouseDesign | null>(null)
-  const [variantsModalDesignType, setVariantsModalDesignType] = useState<"front" | "back">("front")
+  const [showCollectionCard, setShowCollectionCard] = useState(true)
+  const [manualMeasurementsEnabled, setManualMeasurementsEnabled] = useState(true)
+  const [isLoadingConfig, setIsLoadingConfig] = useState(false)
   
   const { addItem } = useCart()
   const { toast } = useToast()
@@ -231,23 +176,58 @@ export default function CustomDesignPage() {
   const progress = ((currentStepIndex + 1) / steps.length) * 100
 
   useEffect(() => {
-    // Only load data when needed
     if (currentStep === "fabric") {
+      fetchFabricCollectionSetting()
       fetchFabrics()
     } else if (currentStep === "design") {
-      fetchDesigns()
       fetchModels()
+    } else if (currentStep === "measurements") {
+      fetchManualMeasurementsSetting()
     }
   }, [currentStep])
 
-  const fetchFabrics = async () => {
-    // Check cache first
-    const cachedFabrics = getCache('fabrics')
-    if (cachedFabrics) {
-      setFabrics(cachedFabrics)
-      return
+  const fetchFabricCollectionSetting = async () => {
+    try {
+      const response = await fetch("/api/config?key=fabric_collection_enabled")
+      if (response.ok) {
+        const data = await response.json()
+        if (data.config) {
+          setShowCollectionCard(data.config.value === 'true')
+        } else if (data.value !== undefined) {
+          setShowCollectionCard(data.value === 'true')
+        } else {
+          setShowCollectionCard(true)
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching fabric collection setting:", error)
+      setShowCollectionCard(true)
     }
+  }
 
+  const fetchManualMeasurementsSetting = async () => {
+    setIsLoadingConfig(true)
+    try {
+      const response = await fetch("/api/config?key=manual_measurements_enabled")
+      if (response.ok) {
+        const data = await response.json()
+        if (data.config) {
+          setManualMeasurementsEnabled(data.config.value === 'true')
+        } else if (data.value !== undefined) {
+          setManualMeasurementsEnabled(data.value === 'true')
+        } else {
+          setManualMeasurementsEnabled(true)
+        }
+      }
+    } catch (error) {
+      console.error("Error fetching manual measurements setting:", error)
+      setManualMeasurementsEnabled(true)
+    } finally {
+      setIsLoadingConfig(false)
+    }
+  }
+
+  const fetchFabrics = async () => {
     setIsLoading(true)
     setError(null)
     try {
@@ -255,7 +235,6 @@ export default function CustomDesignPage() {
       if (response.ok) {
         const data = await response.json()
         setFabrics(data.fabrics)
-        setCache('fabrics', data.fabrics)
       } else {
         throw new Error("Failed to fetch fabrics")
       }
@@ -272,83 +251,14 @@ export default function CustomDesignPage() {
     }
   }
 
-  const fetchDesigns = async () => {
-    // Check cache first
-    const cachedFrontDesigns = getCache('frontDesigns')
-    const cachedBackDesigns = getCache('backDesigns')
-    
-    if (cachedFrontDesigns && cachedBackDesigns) {
-      setFrontDesigns(cachedFrontDesigns)
-      setBackDesigns(cachedBackDesigns)
-      return
-    }
-
+  const fetchModels = async () => {
     setIsLoading(true)
     setError(null)
     try {
-      const [frontResponse, backResponse] = await Promise.all([
-        fetch("/api/blouse-designs?type=FRONT&includeVariants=true"),
-        fetch("/api/blouse-designs?type=BACK&includeVariants=true")
-      ])
-
-      if (frontResponse.ok) {
-        const frontData = await frontResponse.json()
-        setFrontDesigns(frontData.designs)
-        setCache('frontDesigns', frontData.designs)
-      }
-
-      if (backResponse.ok) {
-        const backData = await backResponse.json()
-        setBackDesigns(backData.designs)
-        setCache('backDesigns', backData.designs)
-      }
-
-      if (!frontResponse.ok || !backResponse.ok) {
-        throw new Error("Failed to fetch designs")
-      }
-    } catch (error) {
-      console.error("Error fetching designs:", error)
-      setError("Failed to load designs. Please try again.")
-      toast({
-        title: "Error",
-        description: "Failed to load designs. Please try again.",
-        variant: "destructive"
-      })
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const fetchModels = async (page = 1, append = false) => {
-    // Check cache first
-    const cacheKey = `models-page-${page}`
-    const cachedModels = getCache(cacheKey)
-    if (cachedModels) {
-      if (append) {
-        setModels(prev => [...prev, ...cachedModels])
-      } else {
-        setModels(cachedModels)
-      }
-      setHasMoreModels(cachedModels.length >= MODES_PER_PAGE)
-      return
-    }
-
-    setIsLoading(true)
-    setError(null)
-    try {
-      const response = await fetch(`/api/blouse-models?includeDesigns=true&page=${page}&limit=${MODES_PER_PAGE}`)
+      const response = await fetch("/api/blouse-models?includeDesigns=true&page=1&limit=12")
       if (response.ok) {
         const data = await response.json()
-        const newModels = data.models
-        
-        if (append) {
-          setModels(prev => [...prev, ...newModels])
-        } else {
-          setModels(newModels)
-        }
-        
-        setCache(cacheKey, newModels)
-        setHasMoreModels(data.pagination?.hasMore || newModels.length >= MODES_PER_PAGE)
+        setModels(data.models)
       } else {
         throw new Error("Failed to fetch models")
       }
@@ -365,19 +275,155 @@ export default function CustomDesignPage() {
     }
   }
 
-  const loadMoreModels = () => {
-    if (!isLoading && hasMoreModels) {
-      const nextPage = modelsPage + 1
-      setModelsPage(nextPage)
-      fetchModels(nextPage, true)
+  const calculatePrice = () => {
+    if (!design.fabric) return 0
+    
+    let totalPrice = 0
+    
+    if (!design.fabric.isOwnFabric && design.fabric.pricePerMeter) {
+      totalPrice += design.fabric.pricePerMeter * 1.5
+    }
+    
+    if (design.frontDesign && design.frontDesign.stitchCost) {
+      totalPrice += design.frontDesign.stitchCost
+    }
+    if (design.backDesign && design.backDesign.stitchCost) {
+      totalPrice += design.backDesign.stitchCost
+    }
+    
+    if (design.selectedModels.frontModel && design.selectedModels.frontModel.finalPrice) {
+      totalPrice += design.selectedModels.frontModel.finalPrice
+    }
+    
+    if (design.selectedModels.backModel && design.selectedModels.backModel.finalPrice) {
+      totalPrice += design.selectedModels.backModel.finalPrice
+    }
+    
+    return totalPrice
+  }
+
+  const formatPrice = (price: number) => {
+    return `₹${price.toLocaleString()}`
+  }
+
+  const handleModelSelect = (model: BlouseModel, designType: "front" | "back") => {
+    setDesign(prev => ({
+      ...prev,
+      selectedModels: {
+        ...prev.selectedModels,
+        [designType + "Model"]: model
+      },
+      ...(designType === "front" && { frontDesign: model.frontDesign }),
+      ...(designType === "back" && { backDesign: model.backDesign })
+    }))
+
+    toast({
+      title: "Model Selected",
+      description: `${model.name} selected as ${designType} design`
+    })
+  }
+
+  const handleModelDeselect = (designType: "front" | "back") => {
+    setDesign(prev => ({
+      ...prev,
+      selectedModels: {
+        ...prev.selectedModels,
+        [designType + "Model"]: null
+      },
+      ...(designType === "front" && { frontDesign: null }),
+      ...(designType === "back" && { backDesign: null })
+    }))
+
+    toast({
+      title: "Model Deselected",
+      description: `${designType} design removed`
+    })
+  }
+
+  const handleMeasurementChange = (field: string, value: string) => {
+    setDesign(prev => ({
+      ...prev,
+      measurements: { ...prev.measurements, [field]: value }
+    }))
+  }
+
+  const handleAppointmentDateChange = (date: string) => {
+    setDesign(prev => ({ ...prev, appointmentDate: date }))
+  }
+
+  const handleAppointmentTypeChange = (type: "VIRTUAL" | "IN_PERSON") => {
+    setDesign(prev => ({ ...prev, appointmentType: type }))
+  }
+
+  const validateMeasurements = () => {
+    const { measurements } = design
+    return Object.values(measurements).every(value => value.trim() !== "")
+  }
+
+  const isProfessionalMeasurementSelected = () => {
+    return design.appointmentType && design.appointmentDate
+  }
+
+  const handleAddToCart = async () => {
+    if (!design.fabric) {
+      toast({
+        title: "Fabric required",
+        description: "Please select a fabric for your custom blouse.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (!design.selectedModels.frontModel && !design.selectedModels.backModel) {
+      toast({
+        title: "Design required",
+        description: "Please select at least one model (front or back) for your custom blouse.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    if (!isProfessionalMeasurementSelected() && !validateMeasurements()) {
+      toast({
+        title: "Measurements required",
+        description: "Please fill in all required measurement fields or book a professional measurement appointment.",
+        variant: "destructive"
+      })
+      return
+    }
+
+    setIsProcessing(true)
+    try {
+      const customOrder = {
+        productId: "custom-blouse",
+        name: `Custom Blouse - ${design.fabric.name}`,
+        price: calculatePrice(),
+        finalPrice: calculatePrice(),
+        quantity: 1,
+        image: design.fabric.image || "/api/placeholder/200/200",
+        sku: `CUSTOM-${Date.now()}`,
+        customDesign: design
+      }
+
+      addItem(customOrder)
+      toast({
+        title: "Added to cart",
+        description: "Your custom blouse design has been added to cart.",
+      })
+      
+      setCurrentStep("fabric")
+    } catch (error) {
+      toast({
+        title: "Error",
+        description: "Failed to add custom blouse to cart.",
+        variant: "destructive"
+      })
+    } finally {
+      setIsProcessing(false)
     }
   }
 
-  // Loading state based on current step
-  const isLoadingData = (isLoading || (currentStep === "fabric" && fabrics.length === 0) || 
-                        (currentStep === "design" && (frontDesigns.length === 0 || backDesigns.length === 0 || models.length === 0)))
-
-  if (isLoadingData) {
+  if (isLoading) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
@@ -403,220 +449,8 @@ export default function CustomDesignPage() {
     )
   }
 
-  const calculatePrice = () => {
-    if (!design.fabric) return 0
-    
-    let totalPrice = 0
-    
-    // Add fabric cost (only if not customer's own fabric)
-    if (!design.fabric.isOwnFabric && design.fabric.pricePerMeter) {
-      totalPrice += design.fabric.pricePerMeter * 1.5
-    }
-    
-    // Add blouse design stitch cost (front + back)
-    if (design.frontDesign && design.frontDesign.stitchCost) {
-      totalPrice += design.frontDesign.stitchCost
-    }
-    if (design.backDesign && design.backDesign.stitchCost) {
-      totalPrice += design.backDesign.stitchCost
-    }
-    
-    // Add front model price
-    if (design.selectedModels.frontModel && design.selectedModels.frontModel.finalPrice) {
-      totalPrice += design.selectedModels.frontModel.finalPrice
-    }
-    
-    // Add back model price
-    if (design.selectedModels.backModel && design.selectedModels.backModel.finalPrice) {
-      totalPrice += design.selectedModels.backModel.finalPrice
-    }
-    
-    // Total Price = Fabric Price (if applicable) + Blouse Design Stitch Cost + Front Model Price + Back Model Price
-    return totalPrice
-  }
-
-  const formatPrice = (price: number) => {
-    return `₹${price.toLocaleString()}`
-  }
-
-  const handleFabricSelect = (fabric: Fabric) => {
-    setDesign(prev => ({ ...prev, fabric }))
-    setCurrentStep("design")
-  }
-
-  const handleDesignSelect = (designType: "front" | "back", selectedDesign: BlouseDesign) => {
-    setSelectedDesignForVariants(selectedDesign)
-    setVariantsModalDesignType(designType)
-    setShowVariantsModal(true)
-  }
-
-  const handleDesignConfirm = (designType: "front" | "back", selectedDesign: BlouseDesign, selectedVariant: BlouseDesignVariant | null) => {
-    if (designType === "front") {
-      setDesign(prev => ({ 
-        ...prev, 
-        frontDesign: selectedDesign,
-        frontDesignVariant: selectedVariant
-      }))
-    } else {
-      setDesign(prev => ({ 
-        ...prev, 
-        backDesign: selectedDesign,
-        backDesignVariant: selectedVariant
-      }))
-    }
-    setShowVariantsModal(false)
-    setSelectedDesignForVariants(null)
-  }
-
-  const handleDesignVariantSelect = (designType: "front" | "back", selectedVariant: BlouseDesignVariant) => {
-    if (designType === "front") {
-      setDesign(prev => ({ ...prev, frontDesignVariant: selectedVariant }))
-    } else {
-      setDesign(prev => ({ ...prev, backDesignVariant: selectedVariant }))
-    }
-  }
-
-  const handleMeasurementChange = (field: string, value: string) => {
-    setDesign(prev => ({
-      ...prev,
-      measurements: { ...prev.measurements, [field]: value }
-    }))
-  }
-
-  const handleAppointmentDateChange = (date: string) => {
-    setDesign(prev => ({ ...prev, appointmentDate: date }))
-  }
-
-  const handleAppointmentTypeChange = (type: "VIRTUAL" | "IN_PERSON") => {
-    setDesign(prev => ({ ...prev, appointmentType: type }))
-  }
-
-  const handleModelSelect = (model: BlouseModel, designType: "front" | "back") => {
-    setDesign(prev => ({
-      ...prev,
-      selectedModels: {
-        ...prev.selectedModels,
-        [designType + "Model"]: model
-      },
-      // Also extract and store the design from the model
-      ...(designType === "front" && { frontDesign: model.frontDesign }),
-      ...(designType === "back" && { backDesign: model.backDesign })
-    }))
-
-    toast({
-      title: "Model Selected",
-      description: `${model.name} selected as ${designType} design`
-    })
-  }
-
-  const handleModelDeselect = (designType: "front" | "back") => {
-    setDesign(prev => ({
-      ...prev,
-      selectedModels: {
-        ...prev.selectedModels,
-        [designType + "Model"]: null
-      },
-      // Also clear the corresponding design
-      ...(designType === "front" && { frontDesign: null }),
-      ...(designType === "back" && { backDesign: null })
-    }))
-
-    toast({
-      title: "Model Deselected",
-      description: `${designType} design removed`
-    })
-  }
-
-  const proceedToMeasurements = () => {
-    if (!design.selectedModels.frontModel && !design.selectedModels.backModel) {
-      toast({
-        title: "Selection Required",
-        description: "Please select at least one model to continue",
-        variant: "destructive"
-      })
-      return
-    }
-    setCurrentStep("measurements")
-  }
-
-  const validateMeasurements = () => {
-    const { measurements } = design
-    return Object.values(measurements).every(value => value.trim() !== "")
-  }
-
-  const handleAddToCart = async () => {
-    if (!design.fabric) {
-      toast({
-        title: "Fabric required",
-        description: "Please select a fabric for your custom blouse.",
-        variant: "destructive"
-      })
-      return
-    }
-
-    setIsProcessing(true)
-    try {
-      const customOrder = {
-        productId: "custom-blouse",
-        name: `Custom Blouse - ${design.fabric.name}`,
-        price: calculatePrice(),
-        finalPrice: calculatePrice(),
-        quantity: 1,
-        image: design.fabric.image || "/api/placeholder/200/200",
-        sku: `CUSTOM-${Date.now()}`,
-        customDesign: design
-      }
-
-      addItem(customOrder)
-      toast({
-        title: "Added to cart",
-        description: "Your custom blouse design has been added to cart.",
-      })
-      
-      // Reset form
-      setDesign({
-        fabric: null,
-        frontDesign: null,
-        backDesign: null,
-        frontDesignVariant: null,
-        backDesignVariant: null,
-        selectedModels: {
-          frontModel: null,
-          backModel: null
-        },
-        measurements: {
-          bust: "",
-          waist: "",
-          hips: "",
-          shoulder: "",
-          sleeveLength: "",
-          blouseLength: "",
-          notes: ""
-        },
-        appointmentDate: null,
-        appointmentType: null,
-        ownFabricDetails: {
-          name: "",
-          color: "",
-          quantity: 0,
-          description: ""
-        }
-      })
-      setCurrentStep("fabric")
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to add custom blouse to cart.",
-        variant: "destructive"
-      })
-    } finally {
-      setIsProcessing(false)
-    }
-  }
-
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
       <div className="bg-white shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between py-6">
@@ -634,7 +468,6 @@ export default function CustomDesignPage() {
         </div>
       </div>
 
-      {/* Progress Bar */}
       <div className="bg-white border-b">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center justify-between mb-4">
@@ -662,7 +495,6 @@ export default function CustomDesignPage() {
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {currentStep === "fabric" && (
           <div className="space-y-6">
@@ -671,98 +503,97 @@ export default function CustomDesignPage() {
               <p className="text-gray-600">Select from our premium collection or provide your own fabric</p>
             </div>
             
-            {/* Fabric Options */}
             <div className="max-w-6xl mx-auto">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                {/* Option 1: Choose from Collection */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <Palette className="h-5 w-5 mr-2" />
-                      Choose From Our Collection
-                    </CardTitle>
-                    <CardDescription>
-                      Select from our premium fabric collection
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent>
-                    {fabrics.length === 0 ? (
-                      <div className="text-center py-12">
-                        <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-                        <p className="text-gray-600">No fabrics available at the moment.</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4 max-h-96 overflow-y-auto">
-                        {fabrics.map((fabric) => (
-                          <div
-                            key={fabric.id}
-                            className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 hover:shadow-md ${
-                              design.fabric?.id === fabric.id ? "ring-2 ring-pink-600 bg-pink-50" : "border-gray-200"
-                            }`}
-                            onClick={() => {
-                              setDesign(prev => ({ 
-                                ...prev, 
-                                fabric: {
-                                  ...fabric,
-                                  isOwnFabric: false
-                                }
-                              }))
-                            }}
-                          >
-                            <div className="flex items-center space-x-4">
-                              <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                                {fabric.image ? (
-                                  <img 
-                                    src={fabric.image} 
-                                    alt={fabric.name}
-                                    className="w-full h-full object-cover rounded-lg"
-                                  />
-                                ) : (
-                                  <div 
-                                    className="w-12 h-12 rounded border"
-                                    style={{ backgroundColor: fabric.color.toLowerCase() }}
-                                  />
-                                )}
-                              </div>
-                              <div className="flex-1">
-                                <h3 className="font-semibold text-lg">{fabric.name}</h3>
-                                <p className="text-sm text-gray-600 mb-1">{fabric.type}</p>
-                                <div className="flex items-center justify-between">
-                                  <div className="flex items-center space-x-2">
+              <div className={`grid ${showCollectionCard ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'} gap-8`}>
+                {showCollectionCard && (
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center">
+                        <Palette className="h-5 w-5 mr-2" />
+                        Choose From Our Collection
+                      </CardTitle>
+                      <CardDescription>
+                        Select from our premium fabric collection
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent>
+                      {fabrics.length === 0 ? (
+                        <div className="text-center py-12">
+                          <AlertCircle className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                          <p className="text-gray-600">No fabrics available at the moment.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4 max-h-96 overflow-y-auto">
+                          {fabrics.map((fabric) => (
+                            <div
+                              key={fabric.id}
+                              className={`p-4 border rounded-lg cursor-pointer transition-all duration-200 hover:shadow-md ${
+                                design.fabric?.id === fabric.id ? "ring-2 ring-pink-600 bg-pink-50" : "border-gray-200"
+                              }`}
+                              onClick={() => {
+                                setDesign(prev => ({ 
+                                  ...prev, 
+                                  fabric: {
+                                    ...fabric,
+                                    isOwnFabric: false
+                                  }
+                                }))
+                              }}
+                            >
+                              <div className="flex items-center space-x-4">
+                                <div className="w-16 h-16 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  {fabric.image ? (
+                                    <img 
+                                      src={fabric.image} 
+                                      alt={fabric.name}
+                                      className="w-full h-full object-cover rounded-lg"
+                                    />
+                                  ) : (
                                     <div 
-                                      className="w-4 h-4 rounded border"
+                                      className="w-12 h-12 rounded border"
                                       style={{ backgroundColor: fabric.color.toLowerCase() }}
                                     />
-                                    <span className="text-sm text-gray-600">{fabric.color}</span>
-                                  </div>
-                                  <p className="text-lg font-bold text-pink-600">
-                                    ₹{fabric.pricePerMeter}/m
-                                  </p>
+                                  )}
                                 </div>
+                                <div className="flex-1">
+                                  <h3 className="font-semibold text-lg">{fabric.name}</h3>
+                                  <p className="text-sm text-gray-600 mb-1">{fabric.type}</p>
+                                  <div className="flex items-center justify-between">
+                                    <div className="flex items-center space-x-2">
+                                      <div 
+                                        className="w-4 h-4 rounded border"
+                                        style={{ backgroundColor: fabric.color.toLowerCase() }}
+                                      />
+                                      <span className="text-sm text-gray-600">{fabric.color}</span>
+                                    </div>
+                                    <p className="text-lg font-bold text-pink-600">
+                                      ₹{fabric.pricePerMeter}/m
+                                    </p>
+                                  </div>
+                                </div>
+                                {design.fabric?.id === fabric.id && (
+                                  <CheckCircle className="h-5 w-5 text-pink-600" />
+                                )}
                               </div>
-                              {design.fabric?.id === fabric.id && (
-                                <CheckCircle className="h-5 w-5 text-pink-600" />
-                              )}
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {design.fabric && !design.fabric.isOwnFabric && (
-                      <div className="mt-6 pt-4 border-t">
-                        <Button 
-                          onClick={() => setCurrentStep("design")}
-                          className="w-full bg-pink-600 hover:bg-pink-700"
-                        >
-                          Continue to Design Selection
-                          <ArrowRight className="h-4 w-4 ml-2" />
-                        </Button>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
+                          ))}
+                        </div>
+                      )}
+                      {design.fabric && !design.fabric.isOwnFabric && (
+                        <div className="mt-6 pt-4 border-t">
+                          <Button 
+                            onClick={() => setCurrentStep("design")}
+                            className="w-full bg-pink-600 hover:bg-pink-700"
+                          >
+                            Continue to Design Selection
+                            <ArrowRight className="h-4 w-4 ml-2" />
+                          </Button>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                )}
 
-                {/* Option 2: Provide Own Fabric */}
                 <Card>
                   <CardHeader>
                     <CardTitle className="flex items-center">
@@ -900,55 +731,6 @@ export default function CustomDesignPage() {
               <p className="text-gray-600">Choose front and back models for your custom blouse</p>
             </div>
 
-            {/* Selection Summary */}
-            {(design.selectedModels.frontModel || design.selectedModels.backModel) && (
-              <div className="bg-pink-50 border-b border-pink-200 rounded-lg p-4 mb-6">
-                <div className="flex flex-wrap items-center gap-4">
-                  <span className="text-sm font-medium text-pink-800">Selected Models:</span>
-                  
-                  {design.selectedModels.frontModel && (
-                    <Badge variant="secondary" className="bg-green-100 text-green-800 border-green-300">
-                      Front: {design.selectedModels.frontModel.name} - {formatPrice(design.selectedModels.frontModel.finalPrice)}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-auto p-0 ml-2 hover:bg-transparent"
-                        onClick={() => handleModelDeselect("front")}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  )}
-                  
-                  {design.selectedModels.backModel && (
-                    <Badge variant="secondary" className="bg-blue-100 text-blue-800 border-blue-300">
-                      Back: {design.selectedModels.backModel.name} - {formatPrice(design.selectedModels.backModel.finalPrice)}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-auto p-0 ml-2 hover:bg-transparent"
-                        onClick={() => handleModelDeselect("back")}
-                      >
-                        <X className="h-3 w-3" />
-                      </Button>
-                    </Badge>
-                  )}
-                  
-                  {(design.selectedModels.frontModel || design.selectedModels.backModel) && (
-                    <div className="ml-auto">
-                      <span className="text-sm font-medium text-pink-800">
-                        Total: {formatPrice(
-                          (design.selectedModels.frontModel?.finalPrice || 0) + 
-                          (design.selectedModels.backModel?.finalPrice || 0)
-                        )}
-                      </span>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Models Grid */}
             <div className="space-y-6">
               {models.length === 0 ? (
                 <div className="text-center py-12">
@@ -982,7 +764,6 @@ export default function CustomDesignPage() {
                               </div>
                             )}
                             
-                            {/* Selection Indicators */}
                             <div className="absolute top-2 right-2 flex flex-col gap-1">
                               {isSelectedAsFront && (
                                 <Badge className="bg-green-500 text-white">
@@ -996,7 +777,6 @@ export default function CustomDesignPage() {
                               )}
                             </div>
 
-                            {/* Discount Badge */}
                             {model.discount && (
                               <Badge className="absolute top-2 left-2 bg-red-500 text-white">
                                 {model.discount}% OFF
@@ -1013,7 +793,6 @@ export default function CustomDesignPage() {
                             )}
                           </div>
 
-                          {/* Design Information */}
                           <div className="space-y-2">
                             {model.frontDesign && (
                               <div className="flex items-center gap-2 text-sm">
@@ -1031,7 +810,6 @@ export default function CustomDesignPage() {
                             )}
                           </div>
 
-                          {/* Price */}
                           <div className="flex items-center justify-between">
                             <div>
                               {model.discount ? (
@@ -1051,7 +829,6 @@ export default function CustomDesignPage() {
                             </div>
                           </div>
 
-                          {/* Action Buttons */}
                           <div className="space-y-2">
                             {canSelectFront && (
                               <Button
@@ -1109,10 +886,19 @@ export default function CustomDesignPage() {
               )}
             </div>
 
-            {/* Continue Button */}
             <div className="flex justify-center">
               <Button 
-                onClick={proceedToMeasurements}
+                onClick={() => {
+                  if (!design.selectedModels.frontModel && !design.selectedModels.backModel) {
+                    toast({
+                      title: "Selection Required",
+                      description: "Please select at least one model to continue",
+                      variant: "destructive"
+                    })
+                    return
+                  }
+                  setCurrentStep("measurements")
+                }}
                 className="bg-pink-600 hover:bg-pink-700"
                 disabled={!design.selectedModels.frontModel && !design.selectedModels.backModel}
               >
@@ -1130,148 +916,150 @@ export default function CustomDesignPage() {
               <p className="text-gray-600">Enter your measurements or book a professional measurement appointment</p>
             </div>
 
-            {/* Measurement Options */}
             <div className="max-w-4xl mx-auto">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Manual Measurements */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <Ruler className="h-5 w-5 mr-2" />
-                      Enter Measurements Manually
-                    </CardTitle>
-                    <CardDescription>
-                      Provide your measurements for a perfect fit
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-6">
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div>
-                        <Label htmlFor="bust">Bust (inches)*</Label>
-                        <Input
-                          id="bust"
-                          type="number"
-                          placeholder="36"
-                          value={design.measurements.bust}
-                          onChange={(e) => handleMeasurementChange("bust", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="waist">Waist (inches)*</Label>
-                        <Input
-                          id="waist"
-                          type="number"
-                          placeholder="30"
-                          value={design.measurements.waist}
-                          onChange={(e) => handleMeasurementChange("waist", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="hips">Hips (inches)*</Label>
-                        <Input
-                          id="hips"
-                          type="number"
-                          placeholder="38"
-                          value={design.measurements.hips}
-                          onChange={(e) => handleMeasurementChange("hips", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="shoulder">Shoulder (inches)*</Label>
-                        <Input
-                          id="shoulder"
-                          type="number"
-                          placeholder="15"
-                          value={design.measurements.shoulder}
-                          onChange={(e) => handleMeasurementChange("shoulder", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="sleeveLength">Sleeve Length (inches)*</Label>
-                        <Input
-                          id="sleeveLength"
-                          type="number"
-                          placeholder="18"
-                          value={design.measurements.sleeveLength}
-                          onChange={(e) => handleMeasurementChange("sleeveLength", e.target.value)}
-                        />
-                      </div>
-                      <div>
-                        <Label htmlFor="blouseLength">Blouse Length (inches)*</Label>
-                        <Input
-                          id="blouseLength"
-                          type="number"
-                          placeholder="15"
-                          value={design.measurements.blouseLength}
-                          onChange={(e) => handleMeasurementChange("blouseLength", e.target.value)}
-                        />
-                      </div>
-                    </div>
-                    <div className="mt-4">
-                      <Label htmlFor="notes">Additional Notes</Label>
-                      <Textarea
-                        id="notes"
-                        placeholder="Any specific requirements or preferences..."
-                        value={design.measurements.notes}
-                        onChange={(e) => handleMeasurementChange("notes", e.target.value)}
-                        rows={3}
-                      />
-                    </div>
-                    <div className="mt-6">
-                      <Button 
-                        onClick={() => {
-                          if (validateMeasurements()) {
-                            toast({
-                              title: "Measurements Saved",
-                              description: "Your measurements have been saved. Proceed to review your design.",
-                            })
-                            setCurrentStep("review")
-                          } else {
-                            toast({
-                              title: "Incomplete Measurements",
-                              description: "Please fill in all required measurement fields.",
-                              variant: "destructive"
-                            })
-                          }
-                        }}
-                        className="w-full"
-                        disabled={!validateMeasurements()}
-                      >
-                        Save Measurements & Continue
-                        <ArrowRight className="h-4 w-4 ml-2" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-
-                {/* Professional Measurement */}
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="flex items-center">
-                      <Calendar className="h-5 w-5 mr-2" />
-                      Book Professional Measurement
-                    </CardTitle>
-                    <CardDescription>
-                      Our experts will take accurate measurements for the perfect fit. 
-                      Available for virtual or in-person appointments.
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="p-6">
-                    <div className="space-y-4">
-                      <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
-                        <div className="flex items-start space-x-3">
-                          <Calendar className="h-5 w-5 text-blue-600 mt-0.5" />
+              {isLoadingConfig ? (
+                <div className="flex items-center justify-center py-12">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-pink-600 mr-3"></div>
+                  <span className="text-gray-600">Loading configuration...</span>
+                </div>
+              ) : (
+                <div className={`grid ${manualMeasurementsEnabled ? 'grid-cols-1 lg:grid-cols-2' : 'grid-cols-1'} gap-6`}>
+                  {manualMeasurementsEnabled && (
+                    <Card>
+                      <CardHeader>
+                        <CardTitle className="flex items-center">
+                          <Ruler className="h-5 w-5 mr-2" />
+                          Enter Measurements Manually
+                        </CardTitle>
+                        <CardDescription>
+                          Provide your measurements for a perfect fit
+                        </CardDescription>
+                      </CardHeader>
+                      <CardContent className="p-6">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                           <div>
-                            <h4 className="font-medium text-blue-900">Professional Measurement Service</h4>
-                            <p className="text-sm text-blue-700 mt-1">
-                              Let our experts take your measurements for the perfect fit. 
-                              Choose between virtual video call or in-person appointment.
-                            </p>
+                            <Label htmlFor="bust">Bust (inches)*</Label>
+                            <Input
+                              id="bust"
+                              type="number"
+                              placeholder="36"
+                              value={design.measurements.bust}
+                              onChange={(e) => handleMeasurementChange("bust", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="waist">Waist (inches)*</Label>
+                            <Input
+                              id="waist"
+                              type="number"
+                              placeholder="30"
+                              value={design.measurements.waist}
+                              onChange={(e) => handleMeasurementChange("waist", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="hips">Hips (inches)*</Label>
+                            <Input
+                              id="hips"
+                              type="number"
+                              placeholder="38"
+                              value={design.measurements.hips}
+                              onChange={(e) => handleMeasurementChange("hips", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="shoulder">Shoulder (inches)*</Label>
+                            <Input
+                              id="shoulder"
+                              type="number"
+                              placeholder="15"
+                              value={design.measurements.shoulder}
+                              onChange={(e) => handleMeasurementChange("shoulder", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="sleeveLength">Sleeve Length (inches)*</Label>
+                            <Input
+                              id="sleeveLength"
+                              type="number"
+                              placeholder="18"
+                              value={design.measurements.sleeveLength}
+                              onChange={(e) => handleMeasurementChange("sleeveLength", e.target.value)}
+                            />
+                          </div>
+                          <div>
+                            <Label htmlFor="blouseLength">Blouse Length (inches)*</Label>
+                            <Input
+                              id="blouseLength"
+                              type="number"
+                              placeholder="15"
+                              value={design.measurements.blouseLength}
+                              onChange={(e) => handleMeasurementChange("blouseLength", e.target.value)}
+                            />
                           </div>
                         </div>
-                      </div>
+                        <div className="mt-4">
+                          <Label htmlFor="notes">Additional Notes</Label>
+                          <Textarea
+                            id="notes"
+                            placeholder="Any specific requirements or preferences..."
+                            value={design.measurements.notes}
+                            onChange={(e) => handleMeasurementChange("notes", e.target.value)}
+                            rows={3}
+                          />
+                        </div>
+                        <div className="mt-6">
+                          <Button 
+                            onClick={() => {
+                              if (validateMeasurements()) {
+                                toast({
+                                  title: "Measurements Saved",
+                                  description: "Your measurements have been saved. Proceed to review your design.",
+                                })
+                                setCurrentStep("review")
+                              } else {
+                                toast({
+                                  title: "Incomplete Measurements",
+                                  description: "Please fill in all required measurement fields.",
+                                  variant: "destructive"
+                                })
+                              }
+                            }}
+                            className="w-full"
+                            disabled={!validateMeasurements()}
+                          >
+                            Save Measurements & Continue
+                            <ArrowRight className="h-4 w-4 ml-2" />
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
-                      <div>
+                  <Card>
+                    <CardHeader>
+                      <CardTitle className="flex items-center">
+                        <Calendar className="h-5 w-5 mr-2" />
+                        Book Professional Measurement
+                      </CardTitle>
+                      <CardDescription>
+                        Our experts will take accurate measurements for the perfect fit.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="p-6">
+                      <div className="space-y-4">
+                        <div className="p-4 bg-blue-50 rounded-lg border border-blue-200">
+                          <div className="flex items-start space-x-3">
+                            <Calendar className="h-5 w-5 text-blue-600 mt-0.5" />
+                            <div>
+                              <h4 className="font-medium text-blue-900">Professional Measurement Service</h4>
+                              <p className="text-sm text-blue-700 mt-1">
+                                Let our experts take your measurements for the perfect fit.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
                         <Label>Appointment Type</Label>
                         <div className="grid grid-cols-2 gap-3 mt-2">
                           <Button
@@ -1291,87 +1079,73 @@ export default function CustomDesignPage() {
                             In-Person
                           </Button>
                         </div>
-                      </div>
 
-                      {design.appointmentType && (
-                        <div className="space-y-4">
-                          <div>
-                            <Label htmlFor="appointmentDate">Preferred Date</Label>
-                            <Input
-                              id="appointmentDate"
-                              type="date"
-                              min={new Date().toISOString().split('T')[0]}
-                              value={design.appointmentDate ? new Date(design.appointmentDate).toISOString().split('T')[0] : ''}
-                              onChange={(e) => {
-                                const date = new Date(e.target.value)
-                                const existingTime = design.appointmentDate ? new Date(design.appointmentDate) : new Date()
-                                date.setHours(existingTime.getHours(), existingTime.getMinutes())
-                                handleAppointmentDateChange(date.toISOString())
-                              }}
-                              className="mt-1"
-                            />
-                          </div>
-                          
-                          <div>
-                            <Label htmlFor="appointmentTime">Preferred Time</Label>
-                            <Input
-                              id="appointmentTime"
-                              type="time"
-                              value={design.appointmentDate ? new Date(design.appointmentDate).toTimeString().slice(0, 5) : ''}
-                              onChange={(e) => {
-                                const time = e.target.value.split(':')
-                                const existingDate = design.appointmentDate ? new Date(design.appointmentDate) : new Date()
-                                existingDate.setHours(parseInt(time[0]), parseInt(time[1]))
-                                handleAppointmentDateChange(existingDate.toISOString())
-                              }}
-                              className="mt-1"
-                            />
-                          </div>
-                        </div>
-                      )}
-
-                      {design.appointmentDate && design.appointmentType && (
-                        <div className="p-4 bg-green-50 rounded-lg border border-green-200">
-                          <div className="flex items-start space-x-3">
-                            <CheckCircle className="h-5 w-5 text-green-600 mt-0.5" />
+                        {design.appointmentType && (
+                          <div className="space-y-4">
                             <div>
-                              <h4 className="font-medium text-green-900">Appointment Scheduled</h4>
-                              <p className="text-sm text-green-700 mt-1">
-                                {design.appointmentType === "VIRTUAL" ? "Virtual" : "In-person"} measurement appointment scheduled for {new Date(design.appointmentDate).toLocaleDateString()} at {new Date(design.appointmentDate).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                              </p>
+                              <Label htmlFor="appointmentDate">Preferred Date</Label>
+                              <Input
+                                id="appointmentDate"
+                                type="date"
+                                min={new Date().toISOString().split('T')[0]}
+                                value={design.appointmentDate ? new Date(design.appointmentDate).toISOString().split('T')[0] : ''}
+                                onChange={(e) => {
+                                  const date = new Date(e.target.value)
+                                  const existingTime = design.appointmentDate ? new Date(design.appointmentDate) : new Date()
+                                  date.setHours(existingTime.getHours(), existingTime.getMinutes())
+                                  handleAppointmentDateChange(date.toISOString())
+                                }}
+                                className="mt-1"
+                              />
+                            </div>
+                            
+                            <div>
+                              <Label htmlFor="appointmentTime">Preferred Time</Label>
+                              <Input
+                                id="appointmentTime"
+                                type="time"
+                                value={design.appointmentDate ? new Date(design.appointmentDate).toTimeString().slice(0, 5) : ''}
+                                onChange={(e) => {
+                                  const time = e.target.value.split(':')
+                                  const existingDate = design.appointmentDate ? new Date(design.appointmentDate) : new Date()
+                                  existingDate.setHours(parseInt(time[0]), parseInt(time[1]))
+                                  handleAppointmentDateChange(existingDate.toISOString())
+                                }}
+                                className="mt-1"
+                              />
                             </div>
                           </div>
-                        </div>
-                      )}
+                        )}
 
-                      <div className="mt-6">
-                        <Button 
-                          onClick={() => {
-                            if (design.appointmentDate && design.appointmentType) {
-                              toast({
-                                title: "Appointment Confirmed",
-                                description: "Your measurement appointment has been confirmed.",
-                              })
-                              setCurrentStep("review")
-                            } else {
-                              toast({
-                                title: "Incomplete Appointment",
-                                description: "Please select both appointment type and date/time to continue.",
-                                variant: "destructive"
-                              })
-                            }
-                          }}
-                          className="w-full"
-                          disabled={!design.appointmentDate || !design.appointmentType}
-                        >
-                          Confirm Appointment & Continue
-                          <ArrowRight className="h-4 w-4 ml-2" />
-                        </Button>
+                        <div className="mt-6">
+                          <Button 
+                            onClick={() => {
+                              if (design.appointmentDate && design.appointmentType) {
+                                toast({
+                                  title: "Appointment Confirmed",
+                                  description: "Your measurement appointment has been confirmed.",
+                                })
+                                setCurrentStep("review")
+                              } else {
+                                toast({
+                                  title: "Incomplete Appointment",
+                                  description: "Please select both appointment type and date/time to continue.",
+                                  variant: "destructive"
+                                })
+                              }
+                            }}
+                            className="w-full"
+                            disabled={!design.appointmentDate || !design.appointmentType}
+                          >
+                            Confirm Appointment & Continue
+                            <ArrowRight className="h-4 w-4 ml-2" />
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              </div>
+                    </CardContent>
+                  </Card>
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -1384,7 +1158,6 @@ export default function CustomDesignPage() {
             </div>
 
             <div className="max-w-4xl mx-auto grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Design Summary */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -1394,37 +1167,6 @@ export default function CustomDesignPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-3">
-                    {/* Blouse Design Name */}
-                    {(design.frontDesign || design.backDesign) && (
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Blouse Design Name</p>
-                        <div className="space-y-1">
-                          {design.frontDesign && (
-                            <p className="font-medium">Front: {design.frontDesign.name}</p>
-                          )}
-                          {design.backDesign && (
-                            <p className="font-medium">Back: {design.backDesign.name}</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Blouse Design Stitch Cost */}
-                    {(design.frontDesign || design.backDesign) && (
-                      <div>
-                        <p className="text-sm font-medium text-gray-600">Blouse Design Stitch Cost</p>
-                        <div className="space-y-1">
-                          {design.frontDesign && (
-                            <p className="text-sm text-gray-600">Front: ₹{(design.frontDesign.stitchCost || 0).toLocaleString()}</p>
-                          )}
-                          {design.backDesign && (
-                            <p className="text-sm text-gray-600">Back: ₹{(design.backDesign.stitchCost || 0).toLocaleString()}</p>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Front Model Name */}
                     {design.selectedModels.frontModel && (
                       <div>
                         <p className="text-sm font-medium text-gray-600">Front Model Name</p>
@@ -1432,7 +1174,6 @@ export default function CustomDesignPage() {
                       </div>
                     )}
 
-                    {/* Back Model Name */}
                     {design.selectedModels.backModel && (
                       <div>
                         <p className="text-sm font-medium text-gray-600">Back Model Name</p>
@@ -1440,7 +1181,6 @@ export default function CustomDesignPage() {
                       </div>
                     )}
 
-                    {/* Fabric Information */}
                     <div>
                       <p className="text-sm font-medium text-gray-600">Fabric Name</p>
                       {design.fabric?.isOwnFabric ? (
@@ -1493,7 +1233,6 @@ export default function CustomDesignPage() {
                 </CardContent>
               </Card>
 
-              {/* Measurements */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -1546,7 +1285,6 @@ export default function CustomDesignPage() {
                 </CardContent>
               </Card>
 
-              {/* Price Summary */}
               <Card className="lg:col-span-2">
                 <CardHeader>
                   <CardTitle className="flex items-center">
@@ -1556,7 +1294,6 @@ export default function CustomDesignPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="space-y-2">
-                    {/* Fabric Price (only if fabric is not provided by the client) */}
                     {!design.fabric?.isOwnFabric && design.fabric && (
                       <div className="flex justify-between">
                         <span>Fabric Price:</span>
@@ -1564,7 +1301,6 @@ export default function CustomDesignPage() {
                       </div>
                     )}
 
-                    {/* Front Blouse Model Price */}
                     {design.selectedModels.frontModel && (
                       <div className="flex justify-between">
                         <span>Front Blouse Model Price:</span>
@@ -1572,34 +1308,10 @@ export default function CustomDesignPage() {
                       </div>
                     )}
 
-                    {/* Back Blouse Model Price */}
                     {design.selectedModels.backModel && (
                       <div className="flex justify-between">
                         <span>Back Blouse Model Price:</span>
                         <span>₹{design.selectedModels.backModel.finalPrice.toLocaleString()}</span>
-                      </div>
-                    )}
-
-                    {/* Blouse Design Stitch Cost */}
-                    {(design.frontDesign || design.backDesign) && (
-                      <div className="flex justify-between">
-                        <span>Blouse Design Stitch Cost:</span>
-                        <span>₹{((design.frontDesign?.stitchCost || 0) + (design.backDesign?.stitchCost || 0)).toLocaleString()}</span>
-                      </div>
-                    )}
-
-                    {/* Blouse Design Names */}
-                    {(design.frontDesign || design.backDesign) && (
-                      <div className="text-sm text-gray-600">
-                        {design.frontDesign && design.backDesign && (
-                          <p>Designs: {design.frontDesign.name} (Front) + {design.backDesign.name} (Back)</p>
-                        )}
-                        {design.frontDesign && !design.backDesign && (
-                          <p>Design: {design.frontDesign.name} (Front)</p>
-                        )}
-                        {!design.frontDesign && design.backDesign && (
-                          <p>Design: {design.backDesign.name} (Back)</p>
-                        )}
                       </div>
                     )}
 
@@ -1646,25 +1358,6 @@ export default function CustomDesignPage() {
           </div>
         )}
       </div>
-      
-      {/* Design Variants Modal */}
-      <DesignVariantsModal
-        isOpen={showVariantsModal}
-        onClose={() => {
-          setShowVariantsModal(false)
-          setSelectedDesignForVariants(null)
-        }}
-        design={selectedDesignForVariants}
-        selectedVariant={
-          variantsModalDesignType === "front" 
-            ? design.frontDesignVariant 
-            : design.backDesignVariant
-        }
-        onVariantSelect={(variant) => {
-          handleDesignConfirm(variantsModalDesignType, selectedDesignForVariants!, variant)
-        }}
-        designType={variantsModalDesignType}
-      />
     </div>
   )
 }

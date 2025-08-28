@@ -19,6 +19,7 @@ import {
   CreditCard
 } from "lucide-react"
 import Link from "next/link"
+import { useAuth } from "@/contexts/AuthContext"
 
 interface OrderItem {
   id: string
@@ -43,14 +44,16 @@ interface Order {
   updatedAt: string
   items: OrderItem[]
   shippingAddress: {
-    firstName: string
-    lastName: string
+    firstName?: string
+    lastName?: string
+    name?: string
     phone: string
     address: string
     city: string
     state: string
-    zipCode: string
-    country: string
+    zipCode?: string
+    pincode?: string
+    country?: string
   }
   paymentMethod: string
   paymentStatus?: string
@@ -61,49 +64,44 @@ interface Order {
 export default function OrderDetailPage() {
   const params = useParams()
   const orderId = params.id as string
+  const { state: authState } = useAuth()
   const [order, setOrder] = useState<Order | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (orderId) {
+    if (orderId && authState.user) {
       loadOrder()
     }
-  }, [orderId])
+  }, [orderId, authState.user])
 
   const loadOrder = async () => {
     setIsLoading(true)
     try {
-      const userStr = localStorage.getItem('user')
-      const user = userStr ? JSON.parse(userStr) : null
-      
-      if (!user) {
+      if (!authState.user) {
         throw new Error('User not authenticated')
       }
 
-      const response = await fetch(`/api/orders?userId=${user.id}`, {
-        headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`
-        }
+      const response = await fetch(`/api/orders/${orderId}`, {
+        credentials: 'include'
       })
       
       if (response.ok) {
         const data = await response.json()
-        const userOrder = data.orders.find((o: any) => o.id === orderId)
         
-        if (userOrder) {
+        if (data.order) {
           const transformedOrder: Order = {
-            id: userOrder.id,
-            orderNumber: userOrder.orderNumber,
-            status: userOrder.status.toLowerCase(),
-            total: userOrder.total,
-            subtotal: userOrder.subtotal,
-            shipping: userOrder.shipping,
-            discount: userOrder.discount,
-            tax: userOrder.tax,
-            createdAt: userOrder.createdAt,
-            updatedAt: userOrder.updatedAt,
-            items: userOrder.orderItems.map((item: any) => ({
+            id: data.order.id,
+            orderNumber: data.order.orderNumber,
+            status: data.order.status.toLowerCase(),
+            total: data.order.total,
+            subtotal: data.order.subtotal,
+            shipping: data.order.shipping,
+            discount: data.order.discount,
+            tax: data.order.tax,
+            createdAt: data.order.createdAt,
+            updatedAt: data.order.updatedAt,
+            items: data.order.orderItems.map((item: any) => ({
               id: item.id,
               name: item.product?.name || 'Custom Product',
               price: item.price,
@@ -112,16 +110,20 @@ export default function OrderDetailPage() {
               size: item.size,
               color: item.color
             })),
-            shippingAddress: JSON.parse(userOrder.shippingAddress || '{}'),
-            paymentMethod: userOrder.paymentMethod,
-            paymentStatus: userOrder.paymentStatus,
-            estimatedDelivery: userOrder.estimatedDelivery,
-            notes: userOrder.notes
+            shippingAddress: JSON.parse(data.order.shippingAddress || '{}'),
+            paymentMethod: data.order.paymentMethod,
+            paymentStatus: data.order.paymentStatus,
+            estimatedDelivery: data.order.estimatedDelivery,
+            notes: data.order.notes
           }
           setOrder(transformedOrder)
         } else {
           setError('Order not found')
         }
+      } else if (response.status === 404) {
+        setError('Order not found')
+      } else if (response.status === 403) {
+        setError('Unauthorized access to order')
       } else {
         setError('Failed to load order')
       }
@@ -273,31 +275,38 @@ export default function OrderDetailPage() {
                 <CardTitle>Order Items</CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="space-y-4">
-                  {order.items.map((item) => (
-                    <div key={item.id} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
-                      <div className="w-20 h-20 bg-gray-200 rounded-lg flex items-center justify-center">
-                        <Package className="h-8 w-8 text-gray-400" />
-                      </div>
-                      <div className="flex-1">
-                        <h4 className="font-medium text-gray-900">{item.name}</h4>
-                        <div className="flex gap-4 text-sm text-gray-500 mt-1">
-                          <span>Qty: {item.quantity}</span>
-                          {item.size && <span>Size: {item.size}</span>}
-                          {item.color && <span>Color: {item.color}</span>}
+                {order.items.length === 0 ? (
+                  <div className="text-center py-8">
+                    <Package className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                    <p className="text-gray-500">No items found for this order</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {order.items.map((item) => (
+                      <div key={item.id} className="flex items-center gap-4 p-4 bg-gray-50 rounded-lg">
+                        <div className="w-20 h-20 bg-gray-200 rounded-lg flex items-center justify-center">
+                          <Package className="h-8 w-8 text-gray-400" />
+                        </div>
+                        <div className="flex-1">
+                          <h4 className="font-medium text-gray-900">{item.name}</h4>
+                          <div className="flex gap-4 text-sm text-gray-500 mt-1">
+                            <span>Qty: {item.quantity}</span>
+                            {item.size && <span>Size: {item.size}</span>}
+                            {item.color && <span>Color: {item.color}</span>}
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <p className="font-medium text-gray-900">
+                            <IndianRupee className="inline h-3 w-3" />{item.price}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            Total: <IndianRupee className="inline h-3 w-3" />{item.price * item.quantity}
+                          </p>
                         </div>
                       </div>
-                      <div className="text-right">
-                        <p className="font-medium text-gray-900">
-                          <IndianRupee className="inline h-3 w-3" />{item.price}
-                        </p>
-                        <p className="text-sm text-gray-500">
-                          Total: <IndianRupee className="inline h-3 w-3" />{item.price * item.quantity}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+                )}
               </CardContent>
             </Card>
           </div>
@@ -350,14 +359,18 @@ export default function OrderDetailPage() {
               <CardContent>
                 <div className="space-y-1">
                   <p className="font-medium">
-                    {order.shippingAddress.firstName} {order.shippingAddress.lastName}
+                    {order.shippingAddress.name || 
+                     `${order.shippingAddress.firstName || ''} ${order.shippingAddress.lastName || ''}`.trim() ||
+                     'N/A'}
                   </p>
-                  <p className="text-sm text-gray-600">{order.shippingAddress.address}</p>
+                  <p className="text-sm text-gray-600">{order.shippingAddress.address || 'N/A'}</p>
                   <p className="text-sm text-gray-600">
-                    {order.shippingAddress.city}, {order.shippingAddress.state} {order.shippingAddress.zipCode}
+                    {order.shippingAddress.city || 'N/A'}, {order.shippingAddress.state || 'N/A'} {order.shippingAddress.zipCode || order.shippingAddress.pincode || ''}
                   </p>
-                  <p className="text-sm text-gray-600">{order.shippingAddress.country}</p>
-                  <p className="text-sm text-gray-600">Phone: {order.shippingAddress.phone}</p>
+                  {order.shippingAddress.country && (
+                    <p className="text-sm text-gray-600">{order.shippingAddress.country}</p>
+                  )}
+                  <p className="text-sm text-gray-600">Phone: {order.shippingAddress.phone || 'N/A'}</p>
                 </div>
               </CardContent>
             </Card>
